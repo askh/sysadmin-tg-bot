@@ -1,0 +1,3 @@
+bot_name: "MySysadminBot"
+telegram_token: "0123456789abcdef"
+debug: 1

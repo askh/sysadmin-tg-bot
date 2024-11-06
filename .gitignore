@@ -1,0 +1,6 @@
+/.spyproject
+*~
+.env
+.env.*
+__pycache__
+/sysadmin-tg-bot.yaml
