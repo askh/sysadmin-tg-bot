@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import typing
 import whois
 import yaml
 
@@ -50,11 +51,19 @@ class UserState(StatesGroup):
     man_name = State()
 
 
-DOMAIN_NAME_CHARS = r'[a-z0-9а-яё-]'
+DOMAIN_NAME_LETTERS = r'a-zа-яё-'
+DOMAIN_NAME_CHARS = r'0-9' + DOMAIN_NAME_LETTERS
+# Bracket expressions for this character sets
+DOMAIN_NAME_LETTERS_BE = f"[{DOMAIN_NAME_LETTERS}]"
+DOMAIN_NAME_CHARS_BE = f"[{DOMAIN_NAME_CHARS}]"
 
 DOMAIN_RE = \
-    re.compile(f"^(?:{DOMAIN_NAME_CHARS}+\\.)*{DOMAIN_NAME_CHARS}+\\.?$",
+    re.compile(f"^(?:{DOMAIN_NAME_CHARS_BE}+\\.)*{DOMAIN_NAME_CHARS_BE}+\\.?$",
                re.I)
+
+IP4_RE = re.compile(r'^(\\d+\\.){3}\\d$')
+IP6_RE = re.compile(r'^[0-9a-f:]+$', re.I)
+
 DOMAIN_NAME_MAX_LENGTH = 2048
 
 
@@ -100,22 +109,50 @@ def create_menu_main() -> ReplyKeyboardMarkup:
     return keyboard
 
 
-def data_to_str(data):
+def data_to_str(data: typing.Any) -> str:
     if type(data) is list:
         data_str = (str(x) for x in data)
         return ", ".join(data_str)
     return str(data)
 
 
-async def get_whois_data(host: str) -> str:
+def whois_server_for_domain(domain: str) -> str:
+    return domain + ".whois-servers.net"
+
+
+# Коды ошибок
+NO_ERROR = 0  # Ошибка отсутствует
+ERROR_INCORRECT_VALUE = 1  # Было передано некорректное значение
+ERROR_INTERNAL_ERROR = 2  # Внутренняя ошибка
+ERROR_NO_DATA = 3  # Не были получены необходимые данные из внешнего источника
+
+# Текстовые сообщения для ошибок при обработке команды /whois
+WHOIS_ERROR_MESSAGES = {
+    ERROR_INCORRECT_VALUE: "Ошибка в имени хоста",
+    ERROR_INTERNAL_ERROR: "Внутренняя ошибка",
+    ERROR_NO_DATA: "Нет данных"
+}
+
+
+def get_whois_data(host: str) -> (str, int):
+    logger = logging.getLogger(__name__)
+    logger.debug("Whois for host: %s", host)
     if not check_host_name(host):
-        return None
+        return (None, ERROR_INCORRECT_VALUE)
+
+    # if IP4_RE.match(host) is None and IP6_RE.match(host) is None:
+    #     top_domain_match = \
+    #         re.match(r'(?<=\\.(' + DOMAIN_NAME_LETTERS_BE + ')', host)
+    # if top_domain_match is not None:
+    #     top_domain = top_domain_match.group(1)
+    #     whois_server = whois_server_for_domain(top_domain)
+
     text_data = ''
     try:
-        w = whois.whois(host)
+        w = whois.whois(host, command=True)
     except whois.parser.PywhoisError as e:
-        logging.error(e)
-        return None
+        logger.error(e)
+        return (None, ERROR_INTERNAL_ERROR)
 
     w_dict = dict(w)
     used_keys = set()
@@ -126,10 +163,13 @@ async def get_whois_data(host: str) -> str:
 
     for k in fields:
         if k not in used_keys and k in w_dict:
-            text_data += str(k) + ": " + data_to_str(w_dict[k]) + "\n"
             used_keys.add(k)
+            if w_dict[k] is not None:
+                text_data += str(k) + ": " + data_to_str(w_dict[k]) + "\n"
 
-    return text_data
+    if text_data == '':
+        return (None, ERROR_NO_DATA)
+    return (text_data, NO_ERROR)
 
 
 dp = Dispatcher(storage=MemoryStorage())
@@ -137,7 +177,8 @@ dp = Dispatcher(storage=MemoryStorage())
 
 @dp.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
-    """
+    """Обрабатывает команду /start
+
     Parameters
     ----------
     message : Message
@@ -146,41 +187,62 @@ async def command_start_handler(message: Message) -> None:
     Returns
     -------
     None
-        Никакого результата не возвращается.
-
-    Обрабатывает команду /start
     """
     await message.answer(HELP_TEXT, reply_markup=create_menu_main())
 
 
 @dp.message(F.text.lower() == '/whois')
-async def answer_cmd_whois(message: Message, state: FSMContext):
+async def cmd_whois_handler(message: Message, state: FSMContext):
+    """Обрабатывает команду /whois
+    Parameters
+    ----------
+    message : Message
+        Обрабатываемое сообщение.
+    state : FSMContext
+        Состояние конечного автомата.
 
-    await message.answer('Введите имя хоста',
+    Returns
+    -------
+    None.
+    """
+
+    await message.answer('Вводите имена хостов (по одному):',
                          reply_markup=ReplyKeyboardRemove())
-
     await state.set_state(UserState.whois_host)
 
 
 @dp.message(F.text, UserState.whois_host)
-async def answer_whois_host(message: Message, state: FSMContext):
+async def whois_host_handler(message: Message, state: FSMContext):
+    """Обрабатывает очередное имя хоста для команды /whois
+    Parameters
+    ----------
+    message : Message
+        Обрабатываемое сообщение.
+    state : FSMContext
+        Состояние конечного автомата.
+
+    Returns
+    -------
+    None.
+    """
+
     host = message.text
-    whois_text = await get_whois_data(host)
-    # await message.answer('whois ' + host)
+    (whois_text, error) = get_whois_data(host)
     if whois_text is None:
-        whois_text = 'Ошибка при получении данных'
+        if error == ERROR_INTERNAL_ERROR:
+            logger = logging.getLogger(__name__)
+            logger.error("Internal error for /whois for host %", host)
+        whois_text = WHOIS_ERROR_MESSAGES.get(error, "Неизвестная ошибка")
     whois_text = 'whois ' + host + "\n\n" + whois_text
     await message.reply(whois_text, reply_markup=create_menu_main())
 
 
 async def main():
-    """
+    """Главная функция программы
 
-    Returns
+Returns
     -------
     None.
-
-    Главная функция программы
     """
 
     arg_parser = argparse.ArgumentParser(
@@ -204,14 +266,15 @@ async def main():
 
     options = arg_parser.parse_args()
 
+    logger = logging.getLogger(__name__)
     try:
         with open(options.config_file, 'r') as config_file:
             config = yaml.safe_load(config_file)
     except IOError as e:
-        logging.error(f"Can't load the config file: {e}")
+        logger.error(f"Can't load the config file: {e}")
         sys.exit(1)
     except yaml.YAMLError as e:
-        logging.error(f"Can't parse the config file: {e}")
+        logger.error(f"Can't parse the config file: {e}")
         sys.exit(1)
 
     env = {
@@ -224,12 +287,12 @@ async def main():
         try:
             token = config['telegram_token']
         except KeyError as e:
-            logging.error(f"Config error, unknown token: {e}")
+            logger.error(f"Config error, unknown token: {e}")
             sys.exit(1)
 
-    if options.debug:
-        logging.basicConfig(level=logging.DEBUG)
-        logging.debug("Debug mode enabled")
+    if options.debug or config.get('debug') == 1:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Debug mode enabled")
 
     bot = Bot(token=token)
 
