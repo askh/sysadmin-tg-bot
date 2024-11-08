@@ -26,6 +26,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, \
     Message, \
     KeyboardButton, ReplyKeyboardMarkup, \
     ReplyKeyboardRemove
+from aiogram.types.link_preview_options import LinkPreviewOptions
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -172,6 +173,24 @@ def get_whois_data(host: str) -> (str, int):
     return (text_data, NO_ERROR)
 
 
+def get_whois_data_direct(host: str) -> (str, int):
+    logger = logging.getLogger(__name__)
+    logger.debug("Whois for host: %s", host)
+    if not check_host_name(host):
+        return (None, ERROR_INCORRECT_VALUE)
+    text_data = ''
+    try:
+        with subprocess.Popen(['whois', host], stdout=subprocess.PIPE) as proc:
+            text_data_b = proc.stdout.read()
+            if text_data_b is None or len(text_data_b) == 0:
+                return (None, ERROR_NO_DATA)
+            text_data = text_data_b.decode('utf-8')
+            return (text_data, NO_ERROR)
+    except Exception as e:
+        logger.error(e)
+        return (None, ERROR_INTERNAL_ERROR)
+
+
 dp = Dispatcher(storage=MemoryStorage())
 
 
@@ -227,14 +246,17 @@ async def whois_host_handler(message: Message, state: FSMContext):
     """
 
     host = message.text
-    (whois_text, error) = get_whois_data(host)
+    (whois_text, error) = get_whois_data_direct(host)
     if whois_text is None:
         if error == ERROR_INTERNAL_ERROR:
             logger = logging.getLogger(__name__)
             logger.error("Internal error for /whois for host %", host)
         whois_text = WHOIS_ERROR_MESSAGES.get(error, "Неизвестная ошибка")
     whois_text = 'whois ' + host + "\n\n" + whois_text
-    await message.reply(whois_text, reply_markup=create_menu_main())
+    await message.reply(whois_text,
+                        reply_markup=create_menu_main(),
+                        link_preview_options=LinkPreviewOptions(
+                            is_disabled=True))
 
 
 async def main():
