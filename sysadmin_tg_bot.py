@@ -59,8 +59,9 @@ DOMAIN_NAME_LETTERS_BE = f"[{DOMAIN_NAME_LETTERS}]"
 DOMAIN_NAME_CHARS_BE = f"[{DOMAIN_NAME_CHARS}]"
 
 DOMAIN_RE = \
-    re.compile(f"^(?:{DOMAIN_NAME_CHARS_BE}+\\.)*{DOMAIN_NAME_CHARS_BE}+\\.?$",
-               re.I)
+    re.compile(
+        f"\\A(?:{DOMAIN_NAME_CHARS_BE}+\\.)*{DOMAIN_NAME_CHARS_BE}+\\.?\\Z",
+        re.I)
 
 IP4_RE = re.compile(r'^(\\d+\\.){3}\\d$')
 IP6_RE = re.compile(r'^[0-9a-f:]+$', re.I)
