@@ -6,6 +6,7 @@ Created on Sun Oct 27 11:42:34 2024
 @author: askh
 """
 
+import aiohttp
 import argparse
 import asyncio
 from dotenv import dotenv_values
@@ -51,9 +52,12 @@ class UserState(StatesGroup):
 
     man_name = State()
 
+    http_headers_host = State()
+
 
 DOMAIN_NAME_LETTERS = r'a-zа-яё-'
 DOMAIN_NAME_CHARS = r'0-9' + DOMAIN_NAME_LETTERS
+
 # Bracket expressions for this character sets
 DOMAIN_NAME_LETTERS_BE = f"[{DOMAIN_NAME_LETTERS}]"
 DOMAIN_NAME_CHARS_BE = f"[{DOMAIN_NAME_CHARS}]"
@@ -63,16 +67,35 @@ DOMAIN_RE = \
         f"\\A(?:{DOMAIN_NAME_CHARS_BE}+\\.)*{DOMAIN_NAME_CHARS_BE}+\\.?\\Z",
         re.I)
 
-IP4_RE = re.compile(r'^(\\d+\\.){3}\\d$')
-IP6_RE = re.compile(r'^[0-9a-f:]+$', re.I)
+IP4_RE = re.compile(r'\A(\d+\.){3}\d\Z')
+IP6_RE = re.compile(r'\A[0-9a-f:]+\Z', re.I)
 
-DOMAIN_NAME_MAX_LENGTH = 2048
+SITE_RE = re.compile(
+    r'\A(http(?:s)?://)?' +
+    f"((?:{DOMAIN_NAME_CHARS_BE}+\\.)*{DOMAIN_NAME_CHARS_BE}+)" +
+    r'(:\d+)?/?\Z', re.I)
+
+DOMAIN_NAME_MAX_LENGTH = 2048  # Максимально допустимая длина для домена
+
+# Максимально допустимая длина для адреса сайта
+# (например, https://example.com:65535/ - то есть, протокол, адрес,
+# возможно порт, возможно адрес /, но без адресов страниц и параметров GET)
+SITE_URL_MAX_LENGTH = \
+    DOMAIN_NAME_MAX_LENGTH + len('https://') + len(':65535') + len('/')
 
 
 def check_host_name(name: str) -> bool:
     if len(name) > DOMAIN_NAME_MAX_LENGTH:
         return False
     if not re.match(DOMAIN_RE, name):
+        return False
+    return True
+
+
+def check_site_url(url: str) -> bool:
+    if len(url) > SITE_URL_MAX_LENGTH:
+        return False
+    if not SITE_RE.match(url):
         return False
     return True
 
@@ -96,14 +119,14 @@ def create_menu_main() -> ReplyKeyboardMarkup:
 
     button_whois = KeyboardButton(text='/whois')
 
-    button_man = KeyboardButton(text='/man')
+    # button_man = KeyboardButton(text='/man')
 
-    button_smtp_relay = KeyboardButton(text='/smtp_relay')
+    button_http_headers = KeyboardButton(text='/http_headers')
 
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [button_man],
-            [button_smtp_relay, button_whois]
+            # [button_man],
+            [button_http_headers, button_whois]
         ],
         resize_keyboard=True,
         one_time_keyboard=True)
@@ -136,18 +159,14 @@ WHOIS_ERROR_MESSAGES = {
 }
 
 
-def get_whois_data(host: str) -> (str, int):
+def get_whois_data_old(host: str) -> (str, int):
+
     logger = logging.getLogger(__name__)
+
     logger.debug("Whois for host: %s", host)
+
     if not check_host_name(host):
         return (None, ERROR_INCORRECT_VALUE)
-
-    # if IP4_RE.match(host) is None and IP6_RE.match(host) is None:
-    #     top_domain_match = \
-    #         re.match(r'(?<=\\.(' + DOMAIN_NAME_LETTERS_BE + ')', host)
-    # if top_domain_match is not None:
-    #     top_domain = top_domain_match.group(1)
-    #     whois_server = whois_server_for_domain(top_domain)
 
     text_data = ''
     try:
@@ -174,11 +193,15 @@ def get_whois_data(host: str) -> (str, int):
     return (text_data, NO_ERROR)
 
 
-def get_whois_data_direct(host: str) -> (str, int):
+def get_whois_data(host: str) -> (str, int):
+
     logger = logging.getLogger(__name__)
+
     logger.debug("Whois for host: %s", host)
+
     if not check_host_name(host):
         return (None, ERROR_INCORRECT_VALUE)
+
     text_data = ''
     try:
         with subprocess.Popen(['whois', host], stdout=subprocess.PIPE) as proc:
@@ -231,6 +254,29 @@ async def cmd_whois_handler(message: Message, state: FSMContext):
     await state.set_state(UserState.whois_host)
 
 
+@dp.message(F.text.lower() == '/http_headers')
+async def cmd_http_headers_handler(message: Message, state: FSMContext):
+    """
+    Обрабатывает команду /http_headers
+
+    Parameters
+    ----------
+    message : Message
+        Сообщение с командой.
+    state : FSMContext
+        Состояние конечного автомата.
+
+    Returns
+    -------
+    None.
+
+    """
+    await message.answer('Вводите адреса (по одному, ' +
+                         'по умолчанию предполагается https://):',
+                         reply_markup=ReplyKeyboardRemove())
+    await state.set_state(UserState.http_headers_host)
+
+
 @dp.message(F.text, UserState.whois_host)
 async def whois_host_handler(message: Message, state: FSMContext):
     """Обрабатывает очередное имя хоста для команды /whois
@@ -247,14 +293,87 @@ async def whois_host_handler(message: Message, state: FSMContext):
     """
 
     host = message.text
-    (whois_text, error) = get_whois_data_direct(host)
+
+    (whois_text, error) = get_whois_data(host)
+
     if whois_text is None:
         if error == ERROR_INTERNAL_ERROR:
             logger = logging.getLogger(__name__)
-            logger.error("Internal error for /whois for host %", host)
+            logger.error("Internal error for /whois for host %s", host)
         whois_text = WHOIS_ERROR_MESSAGES.get(error, "Неизвестная ошибка")
+
     whois_text = 'whois ' + host + "\n\n" + whois_text
+
     await message.reply(whois_text,
+                        reply_markup=create_menu_main(),
+                        link_preview_options=LinkPreviewOptions(
+                            is_disabled=True))
+
+
+async def get_headers_data(site: str) -> (str, int):
+
+    logger = logging.getLogger(__file__)
+
+    logger.debug("HTTP headers for site %s", site)
+
+    if not check_site_url(site):
+        logger.warn("Incorrect site: %s", site)
+        return (None, ERROR_INCORRECT_VALUE)
+
+    if re.match(r'http(?:s)?://', site) is None:
+        site = 'https://' + site
+
+    if not check_site_url(site):
+        logger.warn("Incorrect site: %s", site)
+        return (None, ERROR_INCORRECT_VALUE)
+
+    headers_text = ''
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(site) as response:
+                if response.status == 200:
+                    for pair in response.raw_headers:
+                        (header, value) = [b.decode() for b in pair]
+                        headers_text += f'{header}: {value}\n'
+                else:
+                    logger.error("Request failed for site %s", site)
+                    return (None, ERROR_NO_DATA)
+        except aiohttp.ClientConnectionError as e:
+            logger.error(e)
+            return (None, ERROR_NO_DATA)
+
+    return (headers_text, NO_ERROR)
+
+
+@dp.message(F.text, UserState.http_headers_host)
+async def http_headers_host_handler(message: Message, state: FSMContext):
+    """Обрабатывает очередное имя хоста для команды /http_headers
+    Parameters
+    ----------
+    message : Message
+        Обрабатываемое сообщение.
+    state : FSMContext
+        Состояние конечного автомата.
+
+    Returns
+    -------
+    None.
+    """
+
+    logger = logging.getLogger(__name__)
+
+    site = message.text
+
+    (headers_text, error) = await get_headers_data(site)
+
+    if headers_text is None:
+        if error == ERROR_INTERNAL_ERROR:
+            logger.error("Internal error for /http_headers for site %s", site)
+        headers_text = WHOIS_ERROR_MESSAGES.get(error, "Неизвестная ошибка")
+
+    headers_text = 'headers for site ' + site + "\n\n" + headers_text
+
+    await message.reply(headers_text,
                         reply_markup=create_menu_main(),
                         link_preview_options=LinkPreviewOptions(
                             is_disabled=True))
