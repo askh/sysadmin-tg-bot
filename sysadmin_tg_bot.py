@@ -33,7 +33,19 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-HELP_TEXT = "Бот для сисадмина."
+HELP_TEXT = """\
+Бот для сисадмина.
+
+/help - вывод данной инструкции
+
+/http_headers - показ заголовков HTTP сайта. После ввода команды вводите \
+далее адреса сайтов по одному, в формате вида example.com, по умолчанию \
+обращение идёт по протоколу HTTPS, можно указать адрес в формате \
+http://example.com для проверки незащищённого соединения
+
+/whois - показ информации WHOIS о сайтах. После ввода команды вводите имена\
+доменов по одному, без указания протокола, порта и т.д., например: example.com
+"""
 
 DEFAULT_CONFIG_FILE = 'sysadmin-tg-bot.yaml'
 
@@ -231,7 +243,25 @@ async def command_start_handler(message: Message) -> None:
     -------
     None
     """
-    await message.answer(HELP_TEXT, reply_markup=create_menu_main())
+    # await message.answer(HELP_TEXT, reply_markup=create_menu_main())
+    await message.answer(HELP_TEXT)
+
+
+@dp.message(F.text.lower() == '/help')
+async def command_help_handler(message: Message) -> None:
+    """Обрабатывает команду /start
+
+    Parameters
+    ----------
+    message : Message
+        Обрабатываемое сообщение
+
+    Returns
+    -------
+    None
+    """
+    # await message.answer(HELP_TEXT, reply_markup=create_menu_main())
+    await message.answer(HELP_TEXT)
 
 
 @dp.message(F.text.lower() == '/whois')
@@ -305,7 +335,7 @@ async def whois_host_handler(message: Message, state: FSMContext):
     whois_text = 'whois ' + host + "\n\n" + whois_text
 
     await message.reply(whois_text,
-                        reply_markup=create_menu_main(),
+                        # reply_markup=create_menu_main(),
                         link_preview_options=LinkPreviewOptions(
                             is_disabled=True))
 
@@ -374,7 +404,7 @@ async def http_headers_host_handler(message: Message, state: FSMContext):
     headers_text = 'headers for site ' + site + "\n\n" + headers_text
 
     await message.reply(headers_text,
-                        reply_markup=create_menu_main(),
+                        # reply_markup=create_menu_main(),
                         link_preview_options=LinkPreviewOptions(
                             is_disabled=True))
 
