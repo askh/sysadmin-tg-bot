@@ -16,7 +16,7 @@ import re
 import subprocess
 import sys
 import typing
-import whois
+# import whois
 import yaml
 
 from aiogram import Bot, Dispatcher, html, Router, F
@@ -171,60 +171,60 @@ WHOIS_ERROR_MESSAGES = {
 }
 
 
-def get_whois_data_old(host: str) -> (str, int):
+# def get_whois_data_old(host: str) -> (str, int):
 
-    logger = logging.getLogger(__name__)
+#     logger = logging.getLogger(__name__)
 
-    logger.debug("Whois for host: %s", host)
+#     logger.debug("Whois for host: %s", host)
 
-    if not check_host_name(host):
-        return (None, ERROR_INCORRECT_VALUE)
+#     if not check_host_name(host):
+#         return (None, ERROR_INCORRECT_VALUE)
 
-    text_data = ''
-    try:
-        w = whois.whois(host, command=True)
-    except whois.parser.PywhoisError as e:
-        logger.error(e)
-        return (None, ERROR_INTERNAL_ERROR)
+#     text_data = ''
+#     try:
+#         w = whois.whois(host, command=True)
+#     except whois.parser.PywhoisError as e:
+#         logger.error(e)
+#         return (None, ERROR_INTERNAL_ERROR)
 
-    w_dict = dict(w)
-    used_keys = set()
+#     w_dict = dict(w)
+#     used_keys = set()
 
-    fields = ['domain_name', 'registrar', 'creation_date', 'expiration_date',
-              'name_servers', 'status', 'emails', 'org']
-    fields.extend(w_dict.keys())
+#     fields = ['domain_name', 'registrar', 'creation_date', 'expiration_date',
+#               'name_servers', 'status', 'emails', 'org']
+#     fields.extend(w_dict.keys())
 
-    for k in fields:
-        if k not in used_keys and k in w_dict:
-            used_keys.add(k)
-            if w_dict[k] is not None:
-                text_data += str(k) + ": " + data_to_str(w_dict[k]) + "\n"
+#     for k in fields:
+#         if k not in used_keys and k in w_dict:
+#             used_keys.add(k)
+#             if w_dict[k] is not None:
+#                 text_data += str(k) + ": " + data_to_str(w_dict[k]) + "\n"
 
-    if text_data == '':
-        return (None, ERROR_NO_DATA)
-    return (text_data, NO_ERROR)
+#     if text_data == '':
+#         return (None, ERROR_NO_DATA)
+#     return (text_data, NO_ERROR)
 
 
-def get_whois_data(host: str) -> (str, int):
+# def get_whois_data(host: str) -> (str, int):
 
-    logger = logging.getLogger(__name__)
+#     logger = logging.getLogger(__name__)
 
-    logger.debug("Whois for host: %s", host)
+#     logger.debug("Whois for host: %s", host)
 
-    if not check_host_name(host):
-        return (None, ERROR_INCORRECT_VALUE)
+#     if not check_host_name(host):
+#         return (None, ERROR_INCORRECT_VALUE)
 
-    text_data = ''
-    try:
-        with subprocess.Popen(['whois', host], stdout=subprocess.PIPE) as proc:
-            text_data_b = proc.stdout.read()
-            if text_data_b is None or len(text_data_b) == 0:
-                return (None, ERROR_NO_DATA)
-            text_data = text_data_b.decode('utf-8')
-            return (text_data, NO_ERROR)
-    except Exception as e:
-        logger.error(e)
-        return (None, ERROR_INTERNAL_ERROR)
+#     text_data = ''
+#     try:
+#         with subprocess.Popen(['whois', host], stdout=subprocess.PIPE) as proc:
+#             text_data_b = proc.stdout.read()
+#             if text_data_b is None or len(text_data_b) == 0:
+#                 return (None, ERROR_NO_DATA)
+#             text_data = text_data_b.decode('utf-8')
+#             return (text_data, NO_ERROR)
+#     except Exception as e:
+#         logger.error(e)
+#         return (None, ERROR_INTERNAL_ERROR)
 
 
 dp = Dispatcher(storage=MemoryStorage())
