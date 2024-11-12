@@ -4,3 +4,4 @@
 .env.*
 __pycache__
 /sysadmin-tg-bot.yaml
+/venv
