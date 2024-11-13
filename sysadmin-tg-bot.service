@@ -1,0 +1,19 @@
+[Unit]
+
+Description = Sysadmin Telegram Bot
+After = network.target
+
+
+[Service]
+
+Type=simple
+User=sysadmin_tg_bot
+Group=sysadmin_tg_bot
+WorkingDirectory=/var/tmp
+ExecStart=/opt/sysadmin_tg_bot/sysadmin_tg_bot.py -c /opt/sysadmin_tg_bot/sysadmin_tg_bot.yaml
+
+
+[Install]
+
+WantedBy = multi-user.target
+

@@ -3,8 +3,8 @@
 set -euo pipefail
 
 declare -r VENV_DIR=./venv
-declare -r REQUIREMENTS_SRC=requirements_src.txt
-declare -r REQUIREMENTS=requirements.txt
+declare -r REQUIREMENTS_SRC=./requirements_src.txt
+declare -r REQUIREMENTS=./requirements.txt
 
 function show_help() {
     echo "Tool for venv environment"

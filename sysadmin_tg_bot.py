@@ -33,6 +33,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from request_limit import RequestLimit
+
 HELP_TEXT = """\
 Бот для сисадмина.
 
@@ -170,6 +172,17 @@ WHOIS_ERROR_MESSAGES = {
     ERROR_NO_DATA: "Нет данных"
 }
 
+REQUEST_LIMIT_TIME_INTERVAL_SEC = 60
+REQUEST_LIMIT_FOR_ID = 2
+REQUEST_LIMIT_TOTAL = 4
+
+net_request_limit = RequestLimit(
+    max_value=REQUEST_LIMIT_FOR_ID,
+    max_id_value=REQUEST_LIMIT_TOTAL,
+    time_interval_sec=REQUEST_LIMIT_TIME_INTERVAL_SEC)
+
+REQUEST_LIMIT_MESSAGE = "Достигнут лимит обращений, попробуйте повторить " + \
+                        "запрос немного позднее"
 
 # def get_whois_data_old(host: str) -> (str, int):
 
@@ -205,26 +218,26 @@ WHOIS_ERROR_MESSAGES = {
 #     return (text_data, NO_ERROR)
 
 
-# def get_whois_data(host: str) -> (str, int):
+def get_whois_data(host: str) -> (str, int):
 
-#     logger = logging.getLogger(__name__)
+    logger = logging.getLogger(__name__)
 
-#     logger.debug("Whois for host: %s", host)
+    logger.debug("Whois for host: %s", host)
 
-#     if not check_host_name(host):
-#         return (None, ERROR_INCORRECT_VALUE)
+    if not check_host_name(host):
+        return (None, ERROR_INCORRECT_VALUE)
 
-#     text_data = ''
-#     try:
-#         with subprocess.Popen(['whois', host], stdout=subprocess.PIPE) as proc:
-#             text_data_b = proc.stdout.read()
-#             if text_data_b is None or len(text_data_b) == 0:
-#                 return (None, ERROR_NO_DATA)
-#             text_data = text_data_b.decode('utf-8')
-#             return (text_data, NO_ERROR)
-#     except Exception as e:
-#         logger.error(e)
-#         return (None, ERROR_INTERNAL_ERROR)
+    text_data = ''
+    try:
+        with subprocess.Popen(['whois', host], stdout=subprocess.PIPE) as proc:
+            text_data_b = proc.stdout.read()
+            if text_data_b is None or len(text_data_b) == 0:
+                return (None, ERROR_NO_DATA)
+            text_data = text_data_b.decode('utf-8')
+            return (text_data, NO_ERROR)
+    except Exception as e:
+        logger.error(e)
+        return (None, ERROR_INTERNAL_ERROR)
 
 
 dp = Dispatcher(storage=MemoryStorage())
@@ -322,22 +335,29 @@ async def whois_host_handler(message: Message, state: FSMContext):
     None.
     """
 
-    host = message.text
+    user_id = message.from_user.id
 
-    (whois_text, error) = get_whois_data(host)
+    if await net_request_limit.request(user_id):
 
-    if whois_text is None:
-        if error == ERROR_INTERNAL_ERROR:
-            logger = logging.getLogger(__name__)
-            logger.error("Internal error for /whois for host %s", host)
-        whois_text = WHOIS_ERROR_MESSAGES.get(error, "Неизвестная ошибка")
+        host = message.text
 
-    whois_text = 'whois ' + host + "\n\n" + whois_text
+        (whois_text, error) = get_whois_data(host)
 
-    await message.reply(whois_text,
-                        # reply_markup=create_menu_main(),
-                        link_preview_options=LinkPreviewOptions(
-                            is_disabled=True))
+        if whois_text is None:
+            if error == ERROR_INTERNAL_ERROR:
+                logger = logging.getLogger(__name__)
+                logger.error("Internal error for /whois for host %s", host)
+            whois_text = WHOIS_ERROR_MESSAGES.get(error, "Неизвестная ошибка")
+
+        whois_text = 'whois ' + host + "\n\n" + whois_text
+
+        await message.reply(whois_text,
+                            # reply_markup=create_menu_main(),
+                            link_preview_options=LinkPreviewOptions(
+                                is_disabled=True))
+
+    else:
+        await message.reply(REQUEST_LIMIT_MESSAGE)
 
 
 async def get_headers_data(site: str) -> (str, int):
