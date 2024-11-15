@@ -99,6 +99,20 @@ SITE_URL_MAX_LENGTH = \
 
 
 def check_host_name(name: str) -> bool:
+    """
+    Проверка допустимости имени хоста
+
+    Parameters
+    ----------
+    name : str
+        Имя хоста.
+
+    Returns
+    -------
+    bool
+        True, если имя хоста допустимо, если же нет, то False.
+
+    """
     if len(name) > DOMAIN_NAME_MAX_LENGTH:
         return False
     if not re.match(DOMAIN_RE, name):
@@ -107,6 +121,24 @@ def check_host_name(name: str) -> bool:
 
 
 def check_site_url(url: str) -> bool:
+    """
+    Проверка допустимости адреса сайта. Адрес сайта -это доменное имя,
+    возможно с префикстом http:// или https://, также возможно с номером
+    порта и, возможно, оканчивающееся символом /. То есть, адрес сайта
+    не содержит имя страницы (кроме корня сайта) и параметров GET, это
+    не адрес страницы, а URL корня сайта.
+
+    Parameters
+    ----------
+    url : str
+        Адрес сайта.
+
+    Returns
+    -------
+    bool
+        True, если адрес сайта допустим, False в ином случае.
+
+    """
     if len(url) > SITE_URL_MAX_LENGTH:
         return False
     if not SITE_RE.match(url):
@@ -156,6 +188,21 @@ def data_to_str(data: typing.Any) -> str:
 
 
 def whois_server_for_domain(domain: str) -> str:
+    """
+    Определяет имя сервера WHOIS для домена, используя whois-servers.net
+
+    Parameters
+    ----------
+    domain : str
+        Имя домена верхнего уровня, без точки.
+
+    Returns
+    -------
+    str
+        Имя сервера WHOIS, который может ответить на запросы о выбранном
+        домене.
+
+    """
     return domain + ".whois-servers.net"
 
 
@@ -165,21 +212,19 @@ ERROR_INCORRECT_VALUE = 1  # Было передано некорректное 
 ERROR_INTERNAL_ERROR = 2  # Внутренняя ошибка
 ERROR_NO_DATA = 3  # Не были получены необходимые данные из внешнего источника
 
-# Текстовые сообщения для ошибок при обработке команды /whois
+# Текстовые сообщения для ошибок при обработке команд
 WHOIS_ERROR_MESSAGES = {
     ERROR_INCORRECT_VALUE: "Ошибка в имени хоста",
     ERROR_INTERNAL_ERROR: "Внутренняя ошибка",
     ERROR_NO_DATA: "Нет данных"
 }
 
-REQUEST_LIMIT_TIME_INTERVAL_SEC = 60
-REQUEST_LIMIT_FOR_ID = 2
-REQUEST_LIMIT_TOTAL = 4
+DEFAULT_REQUEST_LIMIT_TIME_INTERVAL_SEC = 60
+DEFAULT_REQUEST_LIMIT_FOR_ID = 2
+DEFAULT_REQUEST_LIMIT_TOTAL = 10
 
-net_request_limit = RequestLimit(
-    max_value=REQUEST_LIMIT_FOR_ID,
-    max_id_value=REQUEST_LIMIT_TOTAL,
-    time_interval_sec=REQUEST_LIMIT_TIME_INTERVAL_SEC)
+# Объект для контроля за количеством запросов к боту
+net_request_limit = None
 
 REQUEST_LIMIT_MESSAGE = "Достигнут лимит обращений, попробуйте повторить " + \
                         "запрос немного позднее"
@@ -337,7 +382,7 @@ async def whois_host_handler(message: Message, state: FSMContext):
 
     user_id = message.from_user.id
 
-    if await net_request_limit.request(user_id):
+    if net_request_limit.request(user_id):
 
         host = message.text
 
@@ -412,30 +457,42 @@ async def http_headers_host_handler(message: Message, state: FSMContext):
 
     logger = logging.getLogger(__name__)
 
-    site = message.text
+    user_id = message.from_user.id
 
-    (headers_text, error) = await get_headers_data(site)
+    if net_request_limit.request(user_id):
 
-    if headers_text is None:
-        if error == ERROR_INTERNAL_ERROR:
-            logger.error("Internal error for /http_headers for site %s", site)
-        headers_text = WHOIS_ERROR_MESSAGES.get(error, "Неизвестная ошибка")
+        site = message.text
 
-    headers_text = 'headers for site ' + site + "\n\n" + headers_text
+        (headers_text, error) = await get_headers_data(site)
 
-    await message.reply(headers_text,
-                        # reply_markup=create_menu_main(),
-                        link_preview_options=LinkPreviewOptions(
-                            is_disabled=True))
+        if headers_text is None:
+            if error == ERROR_INTERNAL_ERROR:
+                logger.error("Internal error for /http_headers for site %s",
+                             site)
+            headers_text = WHOIS_ERROR_MESSAGES.get(error,
+                                                    "Неизвестная ошибка")
+
+        headers_text = \
+            'Заголовки HTTP для сайта ' + site + ":\n\n" + headers_text
+
+        await message.reply(headers_text,
+                            # reply_markup=create_menu_main(),
+                            link_preview_options=LinkPreviewOptions(
+                                is_disabled=True))
+    else:
+        await message.reply(REQUEST_LIMIT_MESSAGE)
 
 
 async def main():
-    """Главная функция программы
+    """
+    Главная функция программы
 
 Returns
     -------
     None.
     """
+
+    global net_request_limit
 
     arg_parser = argparse.ArgumentParser(
         prog=PROG_NAME
@@ -485,6 +542,14 @@ Returns
     if options.debug or config.get('debug') == 1:
         logger.setLevel(logging.DEBUG)
         logger.debug("Debug mode enabled")
+
+    net_request_limit = RequestLimit(
+        max_total_value=config.get('limit_max_total_value',
+                                   DEFAULT_REQUEST_LIMIT_TOTAL),
+        max_id_value=config.get('limit_max_id_value',
+                                DEFAULT_REQUEST_LIMIT_FOR_ID),
+        time_interval_sec=config.get('imit_time_interval_sec',
+                                     DEFAULT_REQUEST_LIMIT_TIME_INTERVAL_SEC))
 
     bot = Bot(token=token)
 

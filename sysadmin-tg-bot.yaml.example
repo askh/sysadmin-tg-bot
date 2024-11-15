@@ -1,3 +1,6 @@
 bot_name: "MySysadminBot"
 telegram_token: "0123456789abcdef"
 debug: 1
+limit_time_interval_sec: 60
+limit_max_total_value: 20
+limit_max_id_value: 5
