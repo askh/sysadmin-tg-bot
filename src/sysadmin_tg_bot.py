@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import typing
+from urllib.parse import urlparse
 # import whois
 import yaml
 
@@ -97,6 +98,12 @@ DOMAIN_NAME_MAX_LENGTH = 2048  # Максимально допустимая д�
 SITE_URL_MAX_LENGTH = \
     DOMAIN_NAME_MAX_LENGTH + len('https://') + len(':65535') + len('/')
 
+# Отделяем заголовок HTTP
+HTTP_HEADERS_RE = re.compile(r'\A(.+?)(?:\r?\n){2}')
+
+# Максимально допустимый размер заголовков HTTP
+HTTP_HEADERS_MAX_LENGTH = 2048
+
 
 def check_host_name(name: str) -> bool:
     """
@@ -146,19 +153,19 @@ def check_site_url(url: str) -> bool:
     return True
 
 
-def create_menu_main_inline() -> InlineKeyboardMarkup:
+# def create_menu_main_inline() -> InlineKeyboardMarkup:
 
-    ikb = InlineKeyboardBuilder()
+#     ikb = InlineKeyboardBuilder()
 
-    button_whois = InlineKeyboardButton(text='whois',
-                                        callback_data='button_whois')
-    ikb.add(button_whois)
+#     button_whois = InlineKeyboardButton(text='whois',
+#                                         callback_data='button_whois')
+#     ikb.add(button_whois)
 
-    button_man = InlineKeyboardButton(text='man',
-                                      callback_data='button_man')
-    ikb.add(button_man)
+#     button_man = InlineKeyboardButton(text='man',
+#                                       callback_data='button_man')
+#     ikb.add(button_man)
 
-    return ikb.as_markup()
+#     return ikb.as_markup()
 
 
 def create_menu_main() -> ReplyKeyboardMarkup:
@@ -211,12 +218,17 @@ NO_ERROR = 0  # Ошибка отсутствует
 ERROR_INCORRECT_VALUE = 1  # Было передано некорректное значение
 ERROR_INTERNAL_ERROR = 2  # Внутренняя ошибка
 ERROR_NO_DATA = 3  # Не были получены необходимые данные из внешнего источника
+ERROR_DATA_TOO_BIG = 4  # Полученные данные слишком велики для того, чтобы
+#                         дать ответ
+ERROR_ACCESS_DENIED = 5  # Доступ запрещён
 
 # Текстовые сообщения для ошибок при обработке команд
 WHOIS_ERROR_MESSAGES = {
     ERROR_INCORRECT_VALUE: "Ошибка в имени хоста",
     ERROR_INTERNAL_ERROR: "Внутренняя ошибка",
-    ERROR_NO_DATA: "Нет данных"
+    ERROR_NO_DATA: "Нет данных",
+    ERROR_DATA_TOO_BIG: "Размер данных слишком большой",
+    ERROR_ACCESS_DENIED: "Доступ запрещён"
 }
 
 DEFAULT_REQUEST_LIMIT_TIME_INTERVAL_SEC = 60
@@ -407,7 +419,7 @@ async def whois_host_handler(message: Message, state: FSMContext):
 
 async def get_headers_data(site: str) -> (str, int):
 
-    logger = logging.getLogger(__file__)
+    logger = logging.getLogger(__name__)
 
     logger.debug("HTTP headers for site %s", site)
 
@@ -423,19 +435,68 @@ async def get_headers_data(site: str) -> (str, int):
         return (None, ERROR_INCORRECT_VALUE)
 
     headers_text = ''
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(site) as response:
-                if response.status == 200:
-                    for pair in response.raw_headers:
-                        (header, value) = [b.decode() for b in pair]
-                        headers_text += f'{header}: {value}\n'
+    # async with aiohttp.ClientSession() as session:
+    #     try:
+    #         async with session.get(site, allow_redirects=False) as response:
+    #             if response.status == 200:
+    #                 for pair in response.raw_headers:
+    #                     (header, value) = [b.decode() for b in pair]
+    #                     headers_text += f'{header}: {value}\n'
+    #             else:
+    #                 logger.error("Request failed for site %s", site)
+    #                 return (None, ERROR_NO_DATA)
+    #             else:
+    #                 logger.error("Request failed for site %s", site)
+    #                 return (None, ERROR_NO_DATA)
+    #     except aiohttp.ClientConnectionError as e:
+    #         logger.error(e)
+    #         return (None, ERROR_NO_DATA)
+
+    try:
+        site_parsed = urlparse(site)
+        use_ssl = site_parsed.scheme == 'https'
+        host = site_parsed.hostname
+        port = site_parsed.port
+        if port is None:
+            port = 443 if use_ssl else 80
+        logger.debug('Connect data: %s %s %s', str(use_ssl), host, str(port))
+        if not re.match(r'\A[a-z0-9.-]*\Z', host, re.I):
+            host_parts = []
+            for p in host.split('.'):
+                if not re.match(r'\A[a-z0-9-]*\Z', p, re.I):
+                    host_parts.append('xn--' + p.encode('punycode').decode())
                 else:
-                    logger.error("Request failed for site %s", site)
-                    return (None, ERROR_NO_DATA)
-        except aiohttp.ClientConnectionError as e:
-            logger.error(e)
-            return (None, ERROR_NO_DATA)
+                    host_parts.append(p)
+            host = '.'.join(host_parts)
+
+        request_text = f"GET / HTTP/1.1\r\nHost: {host}\r\n\r\n"
+        logger.debug("Request text: %s", request_text)
+        request_data = request_text.encode()
+        reader, writer = \
+            await asyncio.open_connection(host=site_parsed.hostname,
+                                          port=port,
+                                          ssl=use_ssl)
+        writer.write(request_data)
+        await writer.drain()
+        lines = ''
+        logger.debug('Start reading from stream from host: %s',
+                     site_parsed.hostname)
+        while line := await reader.readline():
+            line_str = line.decode()
+            logger.debug('Read line: %s', line_str)
+            if re.match(r'\A\r?\n\Z', line_str):
+                break
+            lines += line_str
+        writer.close()
+        # await writer.wait_closed()
+        headers_text = lines
+        if len(headers_text) > HTTP_HEADERS_MAX_LENGTH:
+            logger.error("HTTP headers are to big for site %s",
+                         site)
+            return (None, ERROR_DATA_TOO_BIG)
+    except Exception as e:
+        logger.error("Exception: " + str(e))
+        return (None, ERROR_INTERNAL_ERROR)
 
     return (headers_text, NO_ERROR)
 
