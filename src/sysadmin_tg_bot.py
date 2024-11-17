@@ -35,6 +35,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from request_limit import RequestLimit
+from host_check import HostChecker
 
 HELP_TEXT = """\
 Бот для сисадмина.
@@ -77,10 +78,10 @@ DOMAIN_NAME_CHARS = r'0-9' + DOMAIN_NAME_LETTERS
 DOMAIN_NAME_LETTERS_BE = f"[{DOMAIN_NAME_LETTERS}]"
 DOMAIN_NAME_CHARS_BE = f"[{DOMAIN_NAME_CHARS}]"
 
-DOMAIN_RE = \
-    re.compile(
-        f"\\A(?:{DOMAIN_NAME_CHARS_BE}+\\.)*{DOMAIN_NAME_CHARS_BE}+\\.?\\Z",
-        re.I)
+# DOMAIN_RE = \
+#     re.compile(
+#         f"\\A(?:{DOMAIN_NAME_CHARS_BE}+\\.)*{DOMAIN_NAME_CHARS_BE}+\\.?\\Z",
+#         re.I)
 
 IP4_RE = re.compile(r'\A(\d+\.){3}\d\Z')
 IP6_RE = re.compile(r'\A[0-9a-f:]+\Z', re.I)
@@ -105,26 +106,26 @@ HTTP_HEADERS_RE = re.compile(r'\A(.+?)(?:\r?\n){2}')
 HTTP_HEADERS_MAX_LENGTH = 2048
 
 
-def check_host_name(name: str) -> bool:
-    """
-    Проверка допустимости имени хоста
+# def check_host_name(name: str) -> bool:
+#     """
+#     Проверка допустимости имени хоста
 
-    Parameters
-    ----------
-    name : str
-        Имя хоста.
+#     Parameters
+#     ----------
+#     name : str
+#         Имя хоста.
 
-    Returns
-    -------
-    bool
-        True, если имя хоста допустимо, если же нет, то False.
+#     Returns
+#     -------
+#     bool
+#         True, если имя хоста допустимо, если же нет, то False.
 
-    """
-    if len(name) > DOMAIN_NAME_MAX_LENGTH:
-        return False
-    if not re.match(DOMAIN_RE, name):
-        return False
-    return True
+#     """
+#     if len(name) > DOMAIN_NAME_MAX_LENGTH:
+#         return False
+#     if not re.match(DOMAIN_RE, name):
+#         return False
+#     return True
 
 
 def check_site_url(url: str) -> bool:
@@ -238,6 +239,9 @@ DEFAULT_REQUEST_LIMIT_TOTAL = 10
 # Объект для контроля за количеством запросов к боту
 net_request_limit = None
 
+# Объект для контроля корректности хостов и IP-адресов
+host_checker = None
+
 REQUEST_LIMIT_MESSAGE = "Достигнут лимит обращений, попробуйте повторить " + \
                         "запрос немного позднее"
 
@@ -281,7 +285,7 @@ def get_whois_data(host: str) -> (str, int):
 
     logger.debug("Whois for host: %s", host)
 
-    if not check_host_name(host):
+    if not host_checker.check_host_name(host):
         return (None, ERROR_INCORRECT_VALUE)
 
     text_data = ''
@@ -554,6 +558,7 @@ Returns
     """
 
     global net_request_limit
+    global host_checker
 
     arg_parser = argparse.ArgumentParser(
         prog=PROG_NAME
@@ -611,6 +616,11 @@ Returns
                                 DEFAULT_REQUEST_LIMIT_FOR_ID),
         time_interval_sec=config.get('imit_time_interval_sec',
                                      DEFAULT_REQUEST_LIMIT_TIME_INTERVAL_SEC))
+
+    host_checker = HostChecker(
+        hostname_min_len=config.get('hostname_min_len', None),
+        hostname_max_len=config.get('hostname_max_len', None)
+        )
 
     bot = Bot(token=token)
 
