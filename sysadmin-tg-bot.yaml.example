@@ -4,7 +4,7 @@ debug: 1
 limit_time_interval_sec: 60
 limit_max_total_value: 20
 limit_max_id_value: 5
-restricted_hosts:
+restricted_hostnames:
   - localhost
 restricted_ipv4:
   - 127.0.0.0/8
@@ -12,3 +12,4 @@ restricted_ipv4:
   - 10.0.0.0/8
 restricted_ipv6:
   - fe80::/10
+  - ::1/128

@@ -139,7 +139,7 @@ class HostChecker:
                 return self.ADDRESS_DENIED
         return self.ADDRESS_OK
 
-    def check_host(self, addr: str) -> bool:
+    def check_host(self, addr: str) -> int:
         """
         Проверка адреса хоста (может быть доменное имя или IP-адрес)
 
@@ -158,3 +158,6 @@ class HostChecker:
             return self.check_ip(addr)
         else:
             return self.check_name(addr)
+
+    def ok(self, addr: str) -> bool:
+        return self.check_host(addr) == self.ADDRESS_OK

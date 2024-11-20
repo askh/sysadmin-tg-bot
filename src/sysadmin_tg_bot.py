@@ -285,7 +285,7 @@ def get_whois_data(host: str) -> (str, int):
 
     logger.debug("Whois for host: %s", host)
 
-    if not host_checker.check_host_name(host):
+    if not host_checker.ok(host):
         return (None, ERROR_INCORRECT_VALUE)
 
     text_data = ''
@@ -423,6 +423,8 @@ async def whois_host_handler(message: Message, state: FSMContext):
 
 async def get_headers_data(site: str) -> (str, int):
 
+    global host_checker
+
     logger = logging.getLogger(__name__)
 
     logger.debug("HTTP headers for site %s", site)
@@ -461,6 +463,10 @@ async def get_headers_data(site: str) -> (str, int):
         use_ssl = site_parsed.scheme == 'https'
         host = site_parsed.hostname
         port = site_parsed.port
+
+        if not host_checker.ok(host):
+            return (None, ERROR_INCORRECT_VALUE)
+
         if port is None:
             port = 443 if use_ssl else 80
         logger.debug('Connect data: %s %s %s', str(use_ssl), host, str(port))
@@ -619,7 +625,10 @@ Returns
 
     host_checker = HostChecker(
         hostname_min_len=config.get('hostname_min_len', None),
-        hostname_max_len=config.get('hostname_max_len', None)
+        hostname_max_len=config.get('hostname_max_len', None),
+        restricted_hostnames=config.get('restricted_hostnames', []),
+        restricted_ipv4=config.get('restricted_ipv4', []),
+        restricted_ipv6=config.get('restricted_ipv6', [])
         )
 
     bot = Bot(token=token)
