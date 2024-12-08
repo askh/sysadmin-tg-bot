@@ -5,7 +5,6 @@ RUN mkdir -m ug=rwx,o-rwx /opt/sysadmin-tg-bot/ && chown tgbot:tgbot /opt/sysadm
 WORKDIR /opt/sysadmin-tg-bot/
 USER tgbot:tgbot
 RUN mkdir .venv && python3 -mvenv .venv && .venv/bin/pip install --upgrade pip
-COPY requirements.txt ./
-COPY src sysadminb-tg-bot.yaml ./
+COPY requirements.txt src sysadmin-tg-bot.yaml ./
 RUN .venv/bin/pip install --no-cache-dir -r requirements.txt
 ENTRYPOINT [".venv/bin/python3", "sysadmin_tg_bot.py"]
