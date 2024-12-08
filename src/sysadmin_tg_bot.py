@@ -421,6 +421,12 @@ async def whois_host_handler(message: Message, state: FSMContext):
         await message.reply(REQUEST_LIMIT_MESSAGE)
 
 
+def normalize_site(site: str) -> str:
+    if re.match(r'http(?:s)?://', site) is None:
+        site = 'https://' + site
+        return site
+
+
 async def get_headers_data(site: str) -> (str, int):
 
     global host_checker
@@ -428,13 +434,6 @@ async def get_headers_data(site: str) -> (str, int):
     logger = logging.getLogger(__name__)
 
     logger.debug("HTTP headers for site %s", site)
-
-    if not check_site_url(site):
-        logger.warn("Incorrect site: %s", site)
-        return (None, ERROR_INCORRECT_VALUE)
-
-    if re.match(r'http(?:s)?://', site) is None:
-        site = 'https://' + site
 
     if not check_site_url(site):
         logger.warn("Incorrect site: %s", site)
@@ -534,7 +533,9 @@ async def http_headers_host_handler(message: Message, state: FSMContext):
 
         site = message.text
 
-        (headers_text, error) = await get_headers_data(site)
+        normalized_site = normalize_site(site)
+
+        (headers_text, error) = await get_headers_data(normalized_site)
 
         if headers_text is None:
             if error == ERROR_INTERNAL_ERROR:
@@ -544,7 +545,8 @@ async def http_headers_host_handler(message: Message, state: FSMContext):
                                                     "Неизвестная ошибка")
 
         headers_text = \
-            'Заголовки HTTP для сайта ' + site + ":\n\n" + headers_text
+            'Заголовки HTTP для сайта ' + normalized_site + ":\n\n" + \
+            headers_text
 
         await message.reply(headers_text,
                             # reply_markup=create_menu_main(),
