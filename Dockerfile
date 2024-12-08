@@ -1,11 +1,11 @@
 FROM python:3
-RUN apt-get update -y && apt-get dist-upgrade -y
+RUN apt-get update -y && apt-get dist-upgrade -y && apt-get install whois
 RUN useradd -ms /bin/bash tgbot
-USER tgbot:tgbot
-RUN mkdir /opt/sysadmin-tg-bot/
+RUN mkdir -m ug=rwx,o-rwx /opt/sysadmin-tg-bot/ && chown tgbot:tgbot /opt/sysadmin-tg-bot
 WORKDIR /opt/sysadmin-tg-bot/
-RUN mkdir .venv && python3 -mvenv .venv && .venv/bin/pip install --update pip
+USER tgbot:tgbot
+RUN mkdir .venv && python3 -mvenv .venv && .venv/bin/pip install --upgrade pip
 COPY requirements.txt ./
-COPY src ./
+COPY src sysadminb-tg-bot.yaml ./
 RUN .venv/bin/pip install --no-cache-dir -r requirements.txt
-CMD [".venv/bin/python3", "src/sysadmin_tg_bot.py"]
+ENTRYPOINT [".venv/bin/python3", "sysadmin_tg_bot.py"]
