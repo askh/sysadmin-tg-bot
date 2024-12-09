@@ -23,7 +23,7 @@ import yaml
 from aiogram import Bot, Dispatcher, html, Router, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, \
     Message, \
     KeyboardButton, ReplyKeyboardMarkup, \
@@ -49,6 +49,9 @@ http://example.com для проверки незащищённого соеди
 
 /whois - показ информации WHOIS о сайтах. После ввода команды вводите имена\
 доменов по одному, без указания протокола, порта и т.д., например: example.com
+
+/cancel - отменить предыдущую команду (например, перестать выполнять команду) \
+whois для вводимых имён доменов)\
 """
 
 DEFAULT_CONFIG_FILE = 'sysadmin-tg-bot.yaml'
@@ -304,6 +307,68 @@ def get_whois_data(host: str) -> (str, int):
 dp = Dispatcher(storage=MemoryStorage())
 
 
+async def whois_answer(message: Message,
+                       text: str):
+    user_id = message.from_user.id
+
+    if net_request_limit.request(user_id):
+
+        host = text
+
+        (whois_text, error) = get_whois_data(host)
+
+        if whois_text is None:
+            if error == ERROR_INTERNAL_ERROR:
+                logger = logging.getLogger(__name__)
+                logger.error("Internal error for /whois for host %s", host)
+            whois_text = WHOIS_ERROR_MESSAGES.get(error, "Неизвестная ошибка")
+
+        whois_text = 'whois ' + host + "\n\n" + whois_text
+
+        await message.reply(whois_text,
+                            # reply_markup=create_menu_main(),
+                            link_preview_options=LinkPreviewOptions(
+                                is_disabled=True))
+
+    else:
+        await message.reply(REQUEST_LIMIT_MESSAGE)
+
+
+async def http_headers_answer(message: Message,
+                              text: str):
+
+    logger = logging.getLogger(__name__)
+
+
+    user_id = message.from_user.id
+
+    if net_request_limit.request(user_id):
+
+        site = text
+
+        normalized_site = normalize_site(site)
+
+        (headers_text, error) = await get_headers_data(normalized_site)
+
+        if headers_text is None:
+            if error == ERROR_INTERNAL_ERROR:
+                logger.error("Internal error for /http_headers for site %s",
+                             site)
+            headers_text = WHOIS_ERROR_MESSAGES.get(error,
+                                                    "Неизвестная ошибка")
+
+        headers_text = \
+            'Заголовки HTTP для сайта ' + normalized_site + ":\n\n" + \
+            headers_text
+
+        await message.reply(headers_text,
+                            # reply_markup=create_menu_main(),
+                            link_preview_options=LinkPreviewOptions(
+                                is_disabled=True))
+    else:
+        await message.reply(REQUEST_LIMIT_MESSAGE)
+
+
 @dp.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
     """Обрабатывает команду /start
@@ -338,8 +403,30 @@ async def command_help_handler(message: Message) -> None:
     await message.answer(HELP_TEXT)
 
 
+@dp.message(Command('cancel'))
+async def cmd_cancel_handler(message: Message, state: FSMContext):
+    """Обрабатывает команду /cancel
+    Parameters
+    ----------
+    message : Message
+        Обрабатываемое сообщение.
+    state : FSMContext
+        Состояние конечного автомата.
+
+    Returns
+    -------
+    None.
+    """
+
+    await message.answer('Команда отменена',
+                         reply_markup=ReplyKeyboardRemove())
+    await state.set_state(UserState.command)
+
+
 @dp.message(Command('whois'))
-async def cmd_whois_handler(message: Message, state: FSMContext):
+async def cmd_whois_handler(message: Message,
+                            command: CommandObject,
+                            state: FSMContext):
     """Обрабатывает команду /whois
     Parameters
     ----------
@@ -353,13 +440,19 @@ async def cmd_whois_handler(message: Message, state: FSMContext):
     None.
     """
 
-    await message.answer('Вводите имена хостов (по одному):',
-                         reply_markup=ReplyKeyboardRemove())
-    await state.set_state(UserState.whois_host)
+    if command.args is None:
+        await message.answer('Вводите имена хостов (по одному):',
+                             reply_markup=ReplyKeyboardRemove())
+        await state.set_state(UserState.whois_host)
+    else:
+        await whois_answer(message, command.args)
+        await state.set_state(UserState.command)
 
 
 @dp.message(Command('http_headers'))
-async def cmd_http_headers_handler(message: Message, state: FSMContext):
+async def cmd_http_headers_handler(message: Message,
+                                   command: CommandObject,
+                                   state: FSMContext):
     """
     Обрабатывает команду /http_headers
 
@@ -375,10 +468,15 @@ async def cmd_http_headers_handler(message: Message, state: FSMContext):
     None.
 
     """
-    await message.answer('Вводите адреса (по одному, ' +
-                         'по умолчанию предполагается https://):',
-                         reply_markup=ReplyKeyboardRemove())
-    await state.set_state(UserState.http_headers_host)
+
+    if command.args is None:
+        await message.answer('Вводите адреса (по одному, ' +
+                             'по умолчанию предполагается https://):',
+                             reply_markup=ReplyKeyboardRemove())
+        await state.set_state(UserState.http_headers_host)
+    else:
+        await http_headers_answer(message, command.args)
+        await state.set_state(UserState.command)
 
 
 @dp.message(F.text, UserState.whois_host)
@@ -396,29 +494,7 @@ async def whois_host_handler(message: Message, state: FSMContext):
     None.
     """
 
-    user_id = message.from_user.id
-
-    if net_request_limit.request(user_id):
-
-        host = message.text
-
-        (whois_text, error) = get_whois_data(host)
-
-        if whois_text is None:
-            if error == ERROR_INTERNAL_ERROR:
-                logger = logging.getLogger(__name__)
-                logger.error("Internal error for /whois for host %s", host)
-            whois_text = WHOIS_ERROR_MESSAGES.get(error, "Неизвестная ошибка")
-
-        whois_text = 'whois ' + host + "\n\n" + whois_text
-
-        await message.reply(whois_text,
-                            # reply_markup=create_menu_main(),
-                            link_preview_options=LinkPreviewOptions(
-                                is_disabled=True))
-
-    else:
-        await message.reply(REQUEST_LIMIT_MESSAGE)
+    await whois_answer(message, message.text)
 
 
 def normalize_site(site: str) -> str:
@@ -525,35 +601,7 @@ async def http_headers_host_handler(message: Message, state: FSMContext):
     None.
     """
 
-    logger = logging.getLogger(__name__)
-
-    user_id = message.from_user.id
-
-    if net_request_limit.request(user_id):
-
-        site = message.text
-
-        normalized_site = normalize_site(site)
-
-        (headers_text, error) = await get_headers_data(normalized_site)
-
-        if headers_text is None:
-            if error == ERROR_INTERNAL_ERROR:
-                logger.error("Internal error for /http_headers for site %s",
-                             site)
-            headers_text = WHOIS_ERROR_MESSAGES.get(error,
-                                                    "Неизвестная ошибка")
-
-        headers_text = \
-            'Заголовки HTTP для сайта ' + normalized_site + ":\n\n" + \
-            headers_text
-
-        await message.reply(headers_text,
-                            # reply_markup=create_menu_main(),
-                            link_preview_options=LinkPreviewOptions(
-                                is_disabled=True))
-    else:
-        await message.reply(REQUEST_LIMIT_MESSAGE)
+    await http_headers_answer(message, message.text)
 
 
 async def main():
