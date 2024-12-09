@@ -23,7 +23,7 @@ import yaml
 from aiogram import Bot, Dispatcher, html, Router, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, \
     Message, \
     KeyboardButton, ReplyKeyboardMarkup, \
@@ -321,7 +321,7 @@ async def command_start_handler(message: Message) -> None:
     await message.answer(HELP_TEXT)
 
 
-@dp.message(F.text.lower() == '/help')
+@dp.message(Command('help'))
 async def command_help_handler(message: Message) -> None:
     """Обрабатывает команду /start
 
@@ -338,7 +338,7 @@ async def command_help_handler(message: Message) -> None:
     await message.answer(HELP_TEXT)
 
 
-@dp.message(F.text.lower() == '/whois')
+@dp.message(Command('whois'))
 async def cmd_whois_handler(message: Message, state: FSMContext):
     """Обрабатывает команду /whois
     Parameters
@@ -358,7 +358,7 @@ async def cmd_whois_handler(message: Message, state: FSMContext):
     await state.set_state(UserState.whois_host)
 
 
-@dp.message(F.text.lower() == '/http_headers')
+@dp.message(Command('http_headers'))
 async def cmd_http_headers_handler(message: Message, state: FSMContext):
     """
     Обрабатывает команду /http_headers
