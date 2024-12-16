@@ -47,10 +47,10 @@ HELP_TEXT = """\
 обращение идёт по протоколу HTTPS, можно указать адрес в формате \
 http://example.com для проверки незащищённого соединения
 
-/whois - показ информации WHOIS о сайтах. После ввода команды вводите имена\
+/whois - показ информации WHOIS о сайтах. После ввода команды вводите имена \
 доменов по одному, без указания протокола, порта и т.д., например: example.com
 
-/cancel - отменить предыдущую команду (например, перестать выполнять команду) \
+/cancel - отменить предыдущую команду (например, перестать выполнять команду \
 whois для вводимых имён доменов)\
 """
 
@@ -70,6 +70,15 @@ class UserState(StatesGroup):
     smtp_relay_host = State()
 
     man_name = State()
+
+    http_headers_host = State()
+
+
+class InlineUserState(StatesGroup):
+
+    command = State()
+
+    whois_host = State()
 
     http_headers_host = State()
 
@@ -339,6 +348,7 @@ async def http_headers_answer(message: Message,
 
     logger = logging.getLogger(__name__)
 
+    logger.debug('Headers request for site: %s', text)
 
     user_id = message.from_user.id
 
@@ -347,6 +357,9 @@ async def http_headers_answer(message: Message,
         site = text
 
         normalized_site = normalize_site(site)
+
+        logger.debug('Headers request for normalized site name: %s',
+                     normalized_site)
 
         (headers_text, error) = await get_headers_data(normalized_site)
 
@@ -498,9 +511,9 @@ async def whois_host_handler(message: Message, state: FSMContext):
 
 
 def normalize_site(site: str) -> str:
-    if re.match(r'http(?:s)?://', site) is None:
+    if re.match(r'\Ahttp(?:s)?://', site) is None:
         site = 'https://' + site
-        return site
+    return site
 
 
 async def get_headers_data(site: str) -> (str, int):
