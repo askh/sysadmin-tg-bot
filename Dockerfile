@@ -1,5 +1,5 @@
 FROM python:3
-RUN apt-get update -y && apt-get dist-upgrade -y && apt-get install whois
+RUN apt-get update -y && apt-get dist-upgrade -y && apt-get install whois bind9-host
 RUN useradd -ms /bin/bash tgbot
 RUN mkdir -m ug=rwx,o-rwx /opt/sysadmin-tg-bot/ && chown tgbot:tgbot /opt/sysadmin-tg-bot
 WORKDIR /opt/sysadmin-tg-bot/

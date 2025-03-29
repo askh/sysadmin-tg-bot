@@ -29,6 +29,8 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, \
     KeyboardButton, ReplyKeyboardMarkup, \
     ReplyKeyboardRemove
 from aiogram.types.link_preview_options import LinkPreviewOptions
+from aiogram.types.inline_query import InlineQuery
+from aiogram.types.inline_query_result_article import InlineQueryResultArticle
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -41,6 +43,8 @@ HELP_TEXT = """\
 Бот для сисадмина.
 
 /help - вывод данной инструкции
+
+/dns - показ информации DNS о хосте
 
 /http_headers - показ заголовков HTTP сайта. После ввода команды вводите \
 далее адреса сайтов по одному, в формате вида example.com, по умолчанию \
@@ -60,6 +64,10 @@ DOTENV_FILE = '.env'
 
 PROG_NAME = 'sysadmin-tg-bot'
 
+CMD_WHOIS = 'whois'
+CMD_HTTP_HEADERS = 'http_headers'
+CMD_DNS = 'dns'
+
 
 class UserState(StatesGroup):
 
@@ -72,6 +80,8 @@ class UserState(StatesGroup):
     man_name = State()
 
     http_headers_host = State()
+    
+    dns_host = State()
 
 
 class InlineUserState(StatesGroup):
@@ -116,6 +126,10 @@ HTTP_HEADERS_RE = re.compile(r'\A(.+?)(?:\r?\n){2}')
 
 # Максимально допустимый размер заголовков HTTP
 HTTP_HEADERS_MAX_LENGTH = 2048
+
+
+def slash_cmd(command_name: str) -> str:
+    return '/' + command_name
 
 
 # def check_host_name(name: str) -> bool:
@@ -291,6 +305,29 @@ REQUEST_LIMIT_MESSAGE = "Достигнут лимит обращений, по�
 #     return (text_data, NO_ERROR)
 
 
+def get_dns_data(host: str) -> (str, int):
+
+    logger = logging.getLogger(__name__)
+
+    logger.debug("DNS records for host: %s", host)
+
+    if not host_checker.ok(host):
+        return (None, ERROR_INCORRECT_VALUE)
+
+    text_data = ''
+    try:
+        with subprocess.Popen(['host', '-a', host],
+                              stdout=subprocess.PIPE) as proc:
+            text_data_b = proc.stdout.read()
+            if text_data_b is None or len(text_data_b) == 0:
+                return (None, ERROR_NO_DATA)
+            text_data = text_data_b.decode('utf-8')
+            return (text_data, NO_ERROR)
+    except Exception as e:
+        logger.error(e)
+        return (None, ERROR_INTERNAL_ERROR)
+
+
 def get_whois_data(host: str) -> (str, int):
 
     logger = logging.getLogger(__name__)
@@ -314,6 +351,31 @@ def get_whois_data(host: str) -> (str, int):
 
 
 dp = Dispatcher(storage=MemoryStorage())
+
+
+async def dns_answer(message: Message,
+                     text: str):
+    user_id = message.from_user.id
+
+    if net_request_limit.request(user_id):
+
+        host = text
+
+        (dns_text, error) = get_dns_data(host)
+
+        if dns_text is None:
+            if error == ERROR_INTERNAL_ERROR:
+                logger = logging.getLogger(__name__)
+                logger.error("Internal error for /dns for host %s", host)
+            dns_text = WHOIS_ERROR_MESSAGES.get(error, "Неизвестная ошибка")
+
+        dns_text = 'DNS records for ' + host + "\n\n" + dns_text
+
+        await message.reply(dns_text,
+                            link_preview_options=LinkPreviewOptions(
+                                is_disabled=True))
+    else:
+        await message.reply(REQUEST_LIMIT_MESSAGE)
 
 
 async def whois_answer(message: Message,
@@ -436,6 +498,32 @@ async def cmd_cancel_handler(message: Message, state: FSMContext):
     await state.set_state(UserState.command)
 
 
+@dp.message(Command('dns'))
+async def cmd_dns_handler(message: Message,
+                          command: CommandObject,
+                          state: FSMContext):
+    """Обрабатывает команду /dns
+    Parameters
+    ----------
+    message : Message
+        Обрабатываемое сообщение.
+    state : FSMContext
+        Состояние конечного автомата.
+
+    Returns
+    -------
+    None.
+    """
+
+    if command.args is None:
+        await message.answer('Вводите имена хостов (по одному):',
+                             reply_markup=ReplyKeyboardRemove())
+        await state.set_state(UserState.dns_host)
+    else:
+        await dns_answer(message, command.args)
+        await state.set_state(UserState.command)
+
+
 @dp.message(Command('whois'))
 async def cmd_whois_handler(message: Message,
                             command: CommandObject,
@@ -490,6 +578,24 @@ async def cmd_http_headers_handler(message: Message,
     else:
         await http_headers_answer(message, command.args)
         await state.set_state(UserState.command)
+
+
+@dp.message(F.text, UserState.dns_host)
+async def dns_host_handler(message: Message, state: FSMContext):
+    """Обрабатывает очередное имя хоста для команды /dns
+    Parameters
+    ----------
+    message : Message
+        Обрабатываемое сообщение.
+    state : FSMContext
+        Состояние конечного автомата.
+
+    Returns
+    -------
+    None.
+    """
+
+    await dns_answer(message, message.text)
 
 
 @dp.message(F.text, UserState.whois_host)
@@ -615,6 +721,27 @@ async def http_headers_host_handler(message: Message, state: FSMContext):
     """
 
     await http_headers_answer(message, message.text)
+
+
+@dp.inline_query(InlineUserState.command)
+async def select_command(inline_query: InlineQuery):
+    inline_commands = [CMD_WHOIS, CMD_HTTP_HEADERS]
+    # inline_slash_commands = [ slash_cmd(x) for x in inline_commands]
+    # all_variants_commands = inline_commands + inline_slash_commands
+    user_command = inline_query.query.stip().replace('/', '')
+    suitable_commands = []
+    selected_command = None
+
+    for cmd in inline_commands:
+        if user_command == cmd:
+            selected_command = cmd
+            break
+        if user_command in cmd:
+            suitable_commands.append(cmd)
+
+    if selected_command is None:
+        if len(suitable_commands) == 0:
+            suitable_commands = inline_commands
 
 
 async def main():
